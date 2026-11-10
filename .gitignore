@@ -221,3 +221,6 @@ __marimo__/
 
 data/
 .venv/
+docs/Project_1*
+CLAUDE.md
+.DS_Store

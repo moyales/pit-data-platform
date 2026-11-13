@@ -10,3 +10,8 @@
 - See Step 7. This is the core of the project.
 ### D-004: Knowledge time for sources with no revision history
 - See Step 9. This is the most important limitation in Week 1.
+## D-005: Strict schema validation at write time
+**Decision.** One pyarrow schema for all sources; validate() rejects any mismatch rather than coercing, except lossless timestamp-unit conversion.
+**Why.** Silent coercion (naive times assumed UTC, strings parsed as floats) is how bad data enters unnoticed. A failed ingest is visible; a wrong value is not.
+**Alternatives considered.** pandera or Pydantic models: more expressive, but an extra dependency and row-oriented (Pydantic). Per-source schemas: more flexible, but the as-of query would need a branch for each source.
+**Limitation.** Validation is opt-in unless the raw writer enforces it. The knowledge-time check is a floor that catches impossible timestamps, not merely optimistic ones.

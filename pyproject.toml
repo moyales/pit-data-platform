@@ -27,5 +27,9 @@ packages = ["src/pitdata"]
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.lint]
+# DTZ (flake8-datetimez) flags naive datetimes, enforcing "UTC everywhere" at lint time.
+extend-select = ["DTZ"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

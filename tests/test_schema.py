@@ -1,7 +1,8 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pyarrow as pa
 import pytest
+
 from pitdata.schema import RECORD_SCHEMA, SchemaError, validate
 
 UTC_US = pa.timestamp("us", tz="UTC")
@@ -14,11 +15,9 @@ def make_table(**overrides) -> pa.Table:
         "series_id": pa.array(["FF3_DAILY.MKT_RF", "FF3_DAILY.MKT_RF"]),
         "valid_date": pa.array([date(2024, 1, 2), date(2024, 1, 3)]),
         "value": pa.array([0.25, -0.11]),
-        "knowledge_time": pa.array([datetime(2024, 2, 29, tzinfo=timezone.utc)] * 2, type=UTC_US),
+        "knowledge_time": pa.array([datetime(2024, 2, 29, tzinfo=UTC)] * 2, type=UTC_US),
         "knowledge_basis": pa.array(["assumed", "assumed"]),
-        "ingest_time": pa.array(
-            [datetime(2026, 11, 12, 15, 0, tzinfo=timezone.utc)] * 2, type=UTC_US
-        ),
+        "ingest_time": pa.array([datetime(2026, 11, 12, 15, 0, tzinfo=UTC)] * 2, type=UTC_US),
         "ingest_id": pa.array(["abc123", "abc123"]),
         "source": pa.array(["ken_french", "ken_french"]),
     }
@@ -62,7 +61,7 @@ def test_naive_timestamp_is_rejected():
 
 def test_non_utc_timestamp_is_rejected():
     eastern = pa.array(
-        [datetime(2024, 2, 29, tzinfo=timezone.utc)] * 2,
+        [datetime(2024, 2, 29, tzinfo=UTC)] * 2,
         type=pa.timestamp("us", tz="America/New_York"),
     )
     with pytest.raises(SchemaError, match="ingest_time"):
@@ -70,9 +69,7 @@ def test_non_utc_timestamp_is_rejected():
 
 
 def test_nanosecond_timestamps_are_converted_to_microseconds():
-    ns = pa.array(
-        [datetime(2024, 2, 29, tzinfo=timezone.utc)] * 2, type=pa.timestamp("ns", tz="UTC")
-    )
+    ns = pa.array([datetime(2024, 2, 29, tzinfo=UTC)] * 2, type=pa.timestamp("ns", tz="UTC"))
     result = validate(make_table(knowledge_time=ns))
     assert result.schema.field("knowledge_time").type == UTC_US
 
@@ -99,7 +96,7 @@ def test_unknown_knowledge_basis_is_rejected():
 
 def test_knowledge_time_before_valid_date_is_rejected():
     too_early = pa.array(
-        [datetime(2024, 1, 2, tzinfo=timezone.utc), datetime(2023, 12, 31, tzinfo=timezone.utc)],
+        [datetime(2024, 1, 2, tzinfo=UTC), datetime(2023, 12, 31, tzinfo=UTC)],
         type=UTC_US,
     )
     with pytest.raises(SchemaError, match="1 row"):
@@ -109,12 +106,13 @@ def test_knowledge_time_before_valid_date_is_rejected():
 def test_knowledge_time_on_valid_date_is_allowed():
     same_day = pa.array(
         [
-            datetime(2024, 1, 2, 21, 0, tzinfo=timezone.utc),
-            datetime(2024, 1, 3, tzinfo=timezone.utc),
+            datetime(2024, 1, 2, 21, 0, tzinfo=UTC),
+            datetime(2024, 1, 3, tzinfo=UTC),
         ],
         type=UTC_US,
     )
     validate(make_table(knowledge_time=same_day))
+
 
 def test_empty_table_passes():
     validate(make_table().slice(0, 0))

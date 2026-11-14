@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 import pyarrow as pa
 import pytest
 
-from pitdata.schema import RECORD_SCHEMA, SchemaError, validate
+from pitdata.schema import RAW_SCHEMA, RECORD_SCHEMA, SchemaError, validate
 
 UTC_US = pa.timestamp("us", tz="UTC")
 
@@ -116,3 +116,35 @@ def test_knowledge_time_on_valid_date_is_allowed():
 
 def test_empty_table_passes():
     validate(make_table().slice(0, 0))
+
+
+# --- RAW_SCHEMA -------------------------------------------------------------
+
+
+def make_raw_table(**overrides) -> pa.Table:
+    """A small valid raw table: a record without the knowledge columns."""
+    return make_table(knowledge_time=None, knowledge_basis=None, **overrides)
+
+
+def test_valid_raw_table_passes_and_matches_raw_schema_exactly():
+    result = validate(make_raw_table(), RAW_SCHEMA)
+    assert result.schema.equals(RAW_SCHEMA, check_metadata=True)
+    assert result.num_rows == 2
+
+
+def test_raw_table_with_knowledge_time_is_rejected():
+    # Raw must not carry knowledge time, even by accident (D-006).
+    table = make_table(knowledge_basis=None)
+    with pytest.raises(SchemaError, match=r"extra=\['knowledge_time'\]"):
+        validate(table, RAW_SCHEMA)
+
+
+def test_full_record_is_rejected_by_raw_schema():
+    with pytest.raises(SchemaError, match=r"extra=\['knowledge_basis', 'knowledge_time'\]"):
+        validate(make_table(), RAW_SCHEMA)
+
+
+def test_raw_table_is_rejected_by_default_record_schema():
+    # The default schema fails safe: forgetting to pass RAW_SCHEMA raises.
+    with pytest.raises(SchemaError, match=r"missing=\['knowledge_basis', 'knowledge_time'\]"):
+        validate(make_raw_table())

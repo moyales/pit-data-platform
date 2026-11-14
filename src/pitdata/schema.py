@@ -1,8 +1,14 @@
-"""The single record shape shared by every source.
+"""The record shapes shared by every source.
 
 Every observation, whether a factor return, a price or a macro value, is stored
-as one row in this long-format schema. Every writer must pass its table through
-`validate()` before anything reaches disk.
+as one row in a long-format schema. There are two:
+
+- RAW_SCHEMA: what a source file said and when we fetched it. No knowledge time,
+  because that is an interpretation derived later (see D-006).
+- RECORD_SCHEMA: a raw row plus `knowledge_time` and `knowledge_basis`. Used by
+  the validated layer and the query API.
+
+Every writer must pass its table through `validate()` before anything reaches disk.
 """
 
 import pyarrow as pa
@@ -18,8 +24,11 @@ KNOWLEDGE_BASES = frozenset({"observed", "assumed"})
 # Microsecond precision is plenty for daily data and is what DuckDB uses natively.
 _TS = pa.timestamp("us", tz="UTC")
 
-RECORD_SCHEMA = pa.schema(
-    [
+# Each field is defined once; both schemas are built from these by name, so a
+# change to a type or nullability cannot make the two schemas drift apart.
+_FIELDS = {
+    f.name: f
+    for f in [
         pa.field("series_id", pa.string(), nullable=False),
         pa.field("valid_date", pa.date32(), nullable=False),
         # Nullable on purpose: a source's missing-value code becomes null, never zero.
@@ -29,17 +38,48 @@ RECORD_SCHEMA = pa.schema(
         pa.field("ingest_time", _TS, nullable=False),
         pa.field("ingest_id", pa.string(), nullable=False),
         pa.field("source", pa.string(), nullable=False),
-    ],
-    metadata={"pitdata_schema_version": SCHEMA_VERSION},
+    ]
+}
+
+
+def _schema(*names: str) -> pa.Schema:
+    return pa.schema(
+        [_FIELDS[n] for n in names],
+        metadata={"pitdata_schema_version": SCHEMA_VERSION},
+    )
+
+
+RAW_SCHEMA = _schema(
+    "series_id",
+    "valid_date",
+    "value",
+    "ingest_time",
+    "ingest_id",
+    "source",
+)
+
+RECORD_SCHEMA = _schema(
+    "series_id",
+    "valid_date",
+    "value",
+    "knowledge_time",
+    "knowledge_basis",
+    "ingest_time",
+    "ingest_id",
+    "source",
 )
 
 
 class SchemaError(ValueError):
-    """Raised when a table does not match RECORD_SCHEMA."""
+    """Raised when a table does not match the schema it is validated against."""
 
 
-def validate(table: pa.Table) -> pa.Table:
-    """Check `table` against RECORD_SCHEMA and return it in canonical form.
+def validate(table: pa.Table, schema: pa.Schema = RECORD_SCHEMA) -> pa.Table:
+    """Check `table` against `schema` and return it in canonical form.
+
+    `schema` is RAW_SCHEMA for the raw writer and RECORD_SCHEMA (the default)
+    for everything downstream. The default fails safe: a raw table validated
+    without passing RAW_SCHEMA is rejected for missing knowledge columns.
 
     Canonical form means: columns in schema order, timestamps in microseconds,
     and the schema's nullability flags and version metadata attached.
@@ -48,16 +88,19 @@ def validate(table: pa.Table) -> pa.Table:
     timestamp unit (e.g. pandas' nanoseconds to microseconds), because that
     loses no meaning; a lossy conversion raises an error during the cast.
     """
-    _check_columns(table)
-    _check_types(table)
-    _check_nulls(table)
-    _check_knowledge_basis(table)
-    _check_knowledge_not_before_valid(table)
-    return table.select(RECORD_SCHEMA.names).cast(RECORD_SCHEMA)
+    _check_columns(table, schema)
+    _check_types(table, schema)
+    _check_nulls(table, schema)
+    # These two checks only make sense where knowledge time exists (not in raw).
+    if "knowledge_basis" in schema.names:
+        _check_knowledge_basis(table)
+    if "knowledge_time" in schema.names:
+        _check_knowledge_not_before_valid(table)
+    return table.select(schema.names).cast(schema)
 
 
-def _check_columns(table: pa.Table) -> None:
-    expected = set(RECORD_SCHEMA.names)
+def _check_columns(table: pa.Table, schema: pa.Schema) -> None:
+    expected = set(schema.names)
     actual = set(table.column_names)
     missing = expected - actual
     extra = actual - expected
@@ -65,8 +108,8 @@ def _check_columns(table: pa.Table) -> None:
         raise SchemaError(f"column mismatch: missing={sorted(missing)}, extra={sorted(extra)}")
 
 
-def _check_types(table: pa.Table) -> None:
-    for field in RECORD_SCHEMA:
+def _check_types(table: pa.Table, schema: pa.Schema) -> None:
+    for field in schema:
         actual = table.schema.field(field.name).type
         if pa.types.is_timestamp(field.type):
             # Naive timestamps are rejected outright: they are the classic source
@@ -80,8 +123,8 @@ def _check_types(table: pa.Table) -> None:
             raise SchemaError(f"{field.name}: expected {field.type}, got {actual}")
 
 
-def _check_nulls(table: pa.Table) -> None:
-    for field in RECORD_SCHEMA:
+def _check_nulls(table: pa.Table, schema: pa.Schema) -> None:
+    for field in schema:
         if not field.nullable and table.column(field.name).null_count > 0:
             raise SchemaError(f"{field.name}: contains nulls but is required")
 

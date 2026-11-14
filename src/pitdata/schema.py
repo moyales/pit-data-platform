@@ -8,7 +8,7 @@ as one row in this long-format schema. Every writer must pass its table through
 import pyarrow as pa
 import pyarrow.compute as pc
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = "1"
 
 # Allowed values for `knowledge_basis`.
 #   observed: knowledge_time was seen at (or near) publication, by us or the vendor.
@@ -33,8 +33,10 @@ RECORD_SCHEMA = pa.schema(
     metadata={"pitdata_schema_version": SCHEMA_VERSION},
 )
 
+
 class SchemaError(ValueError):
     """Raised when a table does not match RECORD_SCHEMA."""
+
 
 def validate(table: pa.Table) -> pa.Table:
     """Check `table` against RECORD_SCHEMA and return it in canonical form.
@@ -53,6 +55,7 @@ def validate(table: pa.Table) -> pa.Table:
     _check_knowledge_not_before_valid(table)
     return table.select(RECORD_SCHEMA.names).cast(RECORD_SCHEMA)
 
+
 def _check_columns(table: pa.Table) -> None:
     expected = set(RECORD_SCHEMA.names)
     actual = set(table.column_names)
@@ -60,6 +63,7 @@ def _check_columns(table: pa.Table) -> None:
     extra = actual - expected
     if missing or extra:
         raise SchemaError(f"column mismatch: missing={sorted(missing)}, extra={sorted(extra)}")
+
 
 def _check_types(table: pa.Table) -> None:
     for field in RECORD_SCHEMA:
@@ -75,16 +79,19 @@ def _check_types(table: pa.Table) -> None:
         elif actual != field.type:
             raise SchemaError(f"{field.name}: expected {field.type}, got {actual}")
 
+
 def _check_nulls(table: pa.Table) -> None:
     for field in RECORD_SCHEMA:
         if not field.nullable and table.column(field.name).null_count > 0:
             raise SchemaError(f"{field.name}: contains nulls but is required")
+
 
 def _check_knowledge_basis(table: pa.Table) -> None:
     found = set(table.column("knowledge_basis").unique().to_pylist())
     unknown = found - KNOWLEDGE_BASES
     if unknown:
         raise SchemaError(f"knowledge_basis: unknown values {sorted(unknown)}")
+
 
 def _check_knowledge_not_before_valid(table: pa.Table) -> None:
     """A value cannot be known before the start of the period it describes.

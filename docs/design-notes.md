@@ -67,3 +67,15 @@ One entry per design decision, written when the decision is made. Later entries 
 **Why.** The risky logic lives in the pure parser, which is fully testable with small hand-made fixtures and no network. Finding the header by content survives a preamble that gains a line.
 **Alternatives considered.** `pandas-datareader` or `read_csv` with a fixed `skiprows`: shorter, but hides exactly the details the project needs to control, and breaks silently when the layout shifts.
 **Limitation.** A format change on the source's side stops the ingest until the parser is updated. That is intended: failing is better than parsing wrongly. A transient network error also fails the command; re-run it.
+
+## D-012: Each ingest records the parser version
+**Decision.** `meta.json` has a `parser_version` field, which the source module passes to `write_raw` and bumps whenever the parser's output could change.
+**Why.** Raw is never rewritten, and identical content returns `unchanged`. So after a parser fix, old ingests keep the old `parsed.parquet`. Without the version, nothing shows which ingests came from which parser.
+**Alternatives considered.** Re-parsing and overwriting `parsed.parquet`: breaks D-002. Using `pitdata_version` only: it changes for unrelated reasons and nobody bumps it per parser.
+**Limitation.** It is a hand-maintained string; forgetting to bump it is not caught. Parser fixes reach the data only when the validated layer re-parses `content/`, not by re-ingesting.
+
+## D-013: Files are fsynced before the ingest folder is renamed
+**Decision.** `write_raw` fsyncs every file and folder in the temp folder before the rename, and the source folder after it.
+**Why.** The rename alone protects against the program crashing. After a power loss, the operating system can have saved the rename before the file contents, leaving a complete-looking folder with truncated files. The fsyncs close that gap for a few milliseconds per ingest.
+**Alternatives considered.** No fsync, with "all-or-nothing on program crash only" in the README: simpler, but weakens the main guarantee of the raw layer.
+**Limitation.** On macOS, `fsync` hands data to the drive but does not force the drive's own cache to disk (that needs `F_FULLFSYNC`). A power loss there can still, rarely, lose the last ingest's data.

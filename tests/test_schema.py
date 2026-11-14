@@ -52,6 +52,12 @@ def test_extra_column_is_rejected():
         validate(table)
 
 
+def test_duplicate_column_is_rejected():
+    table = make_table().append_column("source", pa.array(["x", "y"]))
+    with pytest.raises(SchemaError, match="duplicate columns: \\['source'\\]"):
+        validate(table)
+
+
 def test_naive_timestamp_is_rejected():
     # Deliberately naive: this is the input the schema must reject.
     naive = pa.array([datetime(2024, 2, 29)] * 2, type=pa.timestamp("us"))  # noqa: DTZ001

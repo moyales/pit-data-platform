@@ -100,6 +100,12 @@ def validate(table: pa.Table, schema: pa.Schema = RECORD_SCHEMA) -> pa.Table:
 
 
 def _check_columns(table: pa.Table, schema: pa.Schema) -> None:
+    # Checked first: the set comparison below cannot see duplicate names, and
+    # pyarrow tables allow them.
+    names = table.column_names
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise SchemaError(f"duplicate columns: {duplicates}")
     expected = set(schema.names)
     actual = set(table.column_names)
     missing = expected - actual

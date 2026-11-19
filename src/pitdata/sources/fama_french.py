@@ -2,13 +2,25 @@
 
 The parser is a pure function (text in, table out) so the risky logic is fully
 testable with small fixtures and no network (D-011). Download and archive
-handling stay at the edges.
+handling stay at the edges and are kept deliberately thin:
+
+    download(url) -> zip bytes -> extract_csv -> decode -> parse_ff3_daily -> write_raw
 """
 
+import io
 import re
-from datetime import date
+import zipfile
+import zlib
+from collections.abc import Callable
+from datetime import date, datetime
+from importlib.metadata import version
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import pyarrow as pa
+import requests
+
+from pitdata.raw import IngestResult, write_raw
 
 SOURCE = "ken_french"
 
@@ -36,8 +48,124 @@ _NUMBER = re.compile(r"-?\d+(\.\d+)?")
 _DATE = re.compile(r"\d{8}")
 
 
+# Size caps, enforced while reading rather than trusted from headers (D-018).
+# The real zip is about 180 KB and the CSV about 1.2 MB, so these only trip on
+# something wrong: a zip bomb, or a server sending something else entirely.
+MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+MAX_CONTENT_BYTES = 50 * 1024 * 1024
+
+# (connect, read) seconds. Without a timeout, requests can wait forever.
+TIMEOUT = (10, 60)
+# Generic on purpose: identifies the tool, never the person running it.
+USER_AGENT = f"pitdata/{version('pitdata')} (personal research)"
+
+
 class ParseError(ValueError):
     """Raised when a source file does not have the layout the parser expects."""
+
+
+class DownloadError(ValueError):
+    """Raised when a download is not what we can safely accept."""
+
+
+class ExtractError(ValueError):
+    """Raised when an archive does not hold exactly one readable file."""
+
+
+def download(url: str, *, max_bytes: int = MAX_DOWNLOAD_BYTES) -> bytes:
+    """Fetch `url` and return the body. No retries: a failure fails the ingest; re-run it."""
+    with requests.get(
+        url, headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, stream=True
+    ) as response:
+        response.raise_for_status()
+        # Streamed and counted, because Content-Length can be missing or wrong.
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            total += len(chunk)
+            if total > max_bytes:
+                raise DownloadError(f"{url}: response is larger than {max_bytes:,} bytes")
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def extract_csv(zip_bytes: bytes, *, max_bytes: int = MAX_CONTENT_BYTES) -> tuple[str, bytes]:
+    """Return (member name, bytes) of the zip's single member.
+
+    The member name is returned as found; write_raw rejects any name that is
+    not a plain file name, so a name like "../x.csv" cannot escape the folder.
+    """
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile as e:
+        raise ExtractError("download is not a zip archive") from e
+
+    with archive:
+        members = archive.infolist()
+        if len(members) != 1:
+            names = [m.filename for m in members]
+            raise ExtractError(f"expected exactly one file in the zip, found {len(names)}: {names}")
+        (member,) = members
+        # Folder entries count as members, so "exactly one" alone would accept
+        # a zip holding only an empty folder.
+        if member.is_dir():
+            raise ExtractError(
+                f"expected exactly one file in the zip, found a folder: {member.filename}"
+            )
+        try:
+            with archive.open(member) as f:
+                # The size a zip declares can be faked, so read at most one byte
+                # past the cap and check what actually came out (D-018).
+                data = f.read(max_bytes + 1)
+        except (zipfile.BadZipFile, zlib.error, EOFError) as e:
+            # zipfile checks each member's CRC-32 when it reaches the end, so a
+            # truncated or corrupted download fails here.
+            raise ExtractError(f"{member.filename}: corrupt archive member: {e}") from e
+
+    if len(data) > max_bytes:
+        raise ExtractError(f"{member.filename}: larger than {max_bytes:,} bytes when extracted")
+    return member.filename, data
+
+
+def decode(content: bytes, name: str) -> str:
+    """Decode as strict UTF-8 (D-017).
+
+    The real file is plain ASCII, which UTF-8 reads unchanged. Strict means bytes
+    that are not valid UTF-8 (say, a Windows-1252 file) raise instead of being
+    guessed at. The parser's own checks protect the data rows.
+    """
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise ParseError(f"{name}: not valid UTF-8 ({e})") from e
+
+
+def ingest_ff3_daily(
+    root: Path,
+    ingest_time: datetime,
+    *,
+    fetch: Callable[[str], bytes] = download,
+) -> IngestResult:
+    """Download, extract, parse and write one raw ingest of the daily three factors.
+
+    `fetch` is injected, like the clock (D-010, D-019): tests pass a function
+    returning fixture bytes, so this path is tested end to end without a network.
+    """
+    original = fetch(FF3_DAILY_URL)
+    content_name, content = extract_csv(original)
+    parsed = parse_ff3_daily(decode(content, content_name))
+    return write_raw(
+        root=root,
+        source=SOURCE,
+        url=FF3_DAILY_URL,
+        filename=PurePosixPath(urlparse(FF3_DAILY_URL).path).name,
+        original=original,
+        content=content,
+        content_name=content_name,
+        parsed=parsed,
+        ingest_time=ingest_time,
+        parser_version=PARSER_VERSION,
+    )
 
 
 def parse_ff3_daily(text: str) -> pa.Table:

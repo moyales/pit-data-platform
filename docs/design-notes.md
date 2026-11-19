@@ -115,3 +115,33 @@ One entry per design decision, written when the decision is made. Later entries 
 **Why.** Same reasoning as D-010: an argument makes the dependency visible and lets tests run the full download-to-disk path without a network or patching module internals.
 **Alternatives considered.** Monkeypatching `download` in tests (the spec's plan): works, but hides the dependency. It also does not reach the default argument, which is bound when the function is defined, so the CLI tests would still need to wrap the function.
 **Limitation.** One more parameter on a public function. `download` itself is tested with a fake `requests.get`; the real network path is checked by hand.
+
+## D-020: Knowledge-time records are created per change between consecutive ingests
+**Decision.** For each `(series_id, valid_date)`, the validated layer creates a record when the key first appears and whenever its value differs (`IS DISTINCT FROM`) from its value in the previous ingest that contained it. Values are compared as parsed, before unit conversion. This amends the Week 1 spec's rule, "each distinct value gets one record".
+**Why.** The old rule loses the order of events. A value that goes A, then B, then back to A gives records A@1 and B@2, so a query as of ingest 3 returns B, which is wrong. A timeline needs change points, not distinct values. Comparing before conversion keeps equality exact for values parsed from fixed-decimal text.
+**Alternatives considered.** One record per distinct value (the original rule): wrong on reversions. One record per ingest per key: correct, but stores every unchanged value again, about 105,000 rows per Fama-French ingest.
+**Limitation.** Two changes between consecutive ingests look like one. A key missing from a later ingest creates no record, so withdrawals are not modelled.
+
+## D-021: Assumed knowledge time: end of the second month after, capped by the first ingest's time
+**Decision.** Records from a source's first ingest get `knowledge_time = min(rule(valid_date), ingest_time)`, with `knowledge_basis = "assumed"` only when the rule's instant is strictly earlier. For Fama-French the rule is 00:00 UTC on the first day of the third month after the valid month (for September data, December 1), named and versioned as `ff_month_end_plus_2` v1. All later records get their ingest's time and are `observed`.
+**Why.** The one publication date observed (the 2026-10-26 file, covering data through September 30) shows a lag of about 4 weeks after month end. The rule allows about 9 weeks, because one observation is thin evidence and too late is safe while too early is lookahead. The cap uses the better evidence when it exists: if we downloaded the file before the rule's date, we really did know the values then.
+**Alternatives considered.** End of the following month (October 31 for September data): only 5 days of margin over the one observed date. Stamping all backfilled history with the first ingest time: honest, but makes every historical as-of query empty.
+**Limitation.** The rule is a guess calibrated on one data point. The newest month or two before the first ingest is unusable in a backtest. Values are the current vintage, so restatements made before the first ingest are invisible.
+
+## D-022: The validated layer is derived and replaced, not appended
+**Decision.** `pit build` derives every source from raw in full and writes `data/validated/<source>.parquet`. Each file goes to a temp file in the same folder, is fsynced, then replaces the old file with `os.replace`. Raw stays the only source of truth.
+**Why.** Derivation is a pure, deterministic function of raw, so a full rebuild is always correct and lets the lag rule or a parser change take effect without re-downloading. `os.replace` is atomic within one filesystem, so a reader sees the old file or the new one, never a partial one.
+**Alternatives considered.** Appending new records per ingest: faster, but a rule change would need a migration, and an append bug would persist. Keeping every build: reproducible, but adds versioning machinery before it is needed.
+**Limitation.** After a rule change, results from the previous build cannot be reproduced unless the raw state and the rule version are recorded with them. The table and its quality report are separate files and are not replaced together atomically.
+
+## D-023: Quality checks warn and write a report; only schema violations stop a build
+**Decision.** `pit build` writes `<source>.quality.json` with checks: calendar sessions, restatement counts, nulls, outliers, gaps. Each check has a status (`ok`/`warn`), a count and examples. Warnings are printed but do not fail the build. Schema validation still raises.
+**Why.** A failing quality check is a question for a person, not proof the data is wrong: a missing day may be a real market closure the calendar does not know. Stopping the build would block all data over one questionable date. Schema violations are different: they mean the code is wrong.
+**Alternatives considered.** Fail on any check: safest in principle, but the first odd historical date blocks everything. Store a quality flag on each record: puts check results into the record schema and the as-of query, mixing data with opinions about the data.
+**Limitation.** Warnings can be ignored. Nothing stops a backtest from using data with an open warning.
+
+## D-024: The as-of query takes an aware UTC datetime and returns an Arrow table
+**Decision.** `get(series, start, end, asof)` requires `asof` to be a time-zone-aware UTC `datetime`, and returns a pyarrow `Table` with, per key, the record with the greatest `knowledge_time <= asof`. The core, `get_from`, runs on an in-memory table. DuckDB connections set `TimeZone = 'UTC'`.
+**Why.** A plain date is ambiguous (the start or the end of the day?), and that ambiguity is how off-by-one-day lookahead enters. Arrow keeps pandas at the edges and converts to pandas in one call. Running the core on an in-memory table makes the property tests fast and file-free. DuckDB otherwise displays timestamps in the machine's local zone.
+**Alternatives considered.** Accepting dates as end of day UTC: convenient, but silently picks a convention. Returning pandas: familiar, but makes pandas part of the storage contract.
+**Limitation.** Callers must build a UTC datetime for every query. An unknown series returns an empty table, not an error, because "no such series" and "not known yet" look the same.

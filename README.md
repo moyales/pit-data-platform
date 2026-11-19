@@ -13,4 +13,5 @@ A point-in-time research data store for daily market data: what did we know as o
 - **Crash safety on macOS is best effort.** Files are fsynced before the rename (D-013), but macOS `fsync` does not force the drive's cache to disk.
 
 ### Data
+- **A layout change at the source stops the Fama-French ingest** until the parser is updated. The parser fails on anything unexpected instead of guessing (D-014, D-015).
 - **Fama-French history before the first ingest is not true point-in-time.** It is the current vintage, with knowledge time from an assumed lag rule and marked `knowledge_basis = "assumed"`.

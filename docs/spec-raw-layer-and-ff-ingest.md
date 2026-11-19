@@ -123,6 +123,8 @@ Tests: row count (rows x 4); dates and values exact; missing code is null; perce
 
 ## Not in this step (Week 2), recorded so the design is not lost
 
+> **Superseded** by `docs/spec-validated-layer-and-query.md`. The first rule below (one record per distinct value) is wrong when a value changes and then reverts; records are created per change instead (D-020). The lag rule was also revised (D-021).
+
 Knowledge-time derivation in the validated layer, by replaying ingests of a source in `ingest_time` order:
 
 - For each `(series_id, valid_date)`, each distinct value gets one record. `knowledge_time` is the `ingest_time` of the first ingest in which that value appears, with `knowledge_basis = "observed"`.

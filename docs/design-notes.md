@@ -97,3 +97,21 @@ One entry per design decision, written when the decision is made. Later entries 
 **Why.** Tests must exercise the real format, including Windows line endings, without committing any vendor data. A git setting such as `core.autocrlf` could otherwise silently turn the fixture into an LF file, and the tests would stop covering the real case while still passing.
 **Alternatives considered.** A few real rows: closer to the source, but it is vendor data in the repo. Building all variants in code: no fixture to drift, but no byte-exact copy of the real layout.
 **Limitation.** The fixture matches the layout as checked on 2026-11-18; if the source changes, only the real ingest will notice.
+
+## D-017: Downloaded text is decoded as strict UTF-8
+**Decision.** `decode()` reads the extracted CSV as UTF-8 with strict error handling, and raises `ParseError` on bytes that are not valid UTF-8.
+**Why.** The real file is plain ASCII, which UTF-8 reads unchanged, and UTF-8 also accepts a harmless addition such as `©`. Strict mode never guesses: a file that switches to Windows-1252 raises instead of producing wrong text. The parser's own checks already protect the data rows, so decoding only has to avoid guessing.
+**Alternatives considered.** Strict ASCII: matches today exactly, but stops the ingest over a symbol in the copyright line. Latin-1: can never fail, so it can silently turn bytes into the wrong characters.
+**Limitation.** A source that moves to another encoding stops the ingest until the code is changed. That is intended.
+
+## D-018: Size caps on download and extraction, enforced while reading
+**Decision.** `download` streams the response and raises past 20 MB; `extract_csv` reads at most 50 MB plus one byte from the zip member and raises if it got more. Both are about 50 times the real sizes (a 180 KB zip holding a 1.2 MB CSV).
+**Why.** Everything is held in memory because `write_raw` takes bytes. A zip can be built to expand from kilobytes to gigabytes, and the sizes declared by HTTP headers and zip headers can be missing or false, so the only trustworthy limit is counting what actually arrives.
+**Alternatives considered.** No caps: one bad response can exhaust memory. Trusting `Content-Length` or the zip's declared size: both can be faked.
+**Limitation.** The caps are fixed numbers. A source that legitimately grows past them needs a code change.
+
+## D-019: The download function is injected, like the clock
+**Decision.** `ingest_ff3_daily(root, ingest_time, *, fetch=download)` takes the download function as an optional argument. Tests pass a function returning fixture bytes; the CLI uses the default.
+**Why.** Same reasoning as D-010: an argument makes the dependency visible and lets tests run the full download-to-disk path without a network or patching module internals.
+**Alternatives considered.** Monkeypatching `download` in tests (the spec's plan): works, but hides the dependency. It also does not reach the default argument, which is bound when the function is defined, so the CLI tests would still need to wrap the function.
+**Limitation.** One more parameter on a public function. `download` itself is tested with a fake `requests.get`; the real network path is checked by hand.

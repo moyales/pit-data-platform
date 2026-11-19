@@ -224,3 +224,6 @@ data/
 docs/Project_1*
 CLAUDE.md
 .DS_Store
+
+# Private study notes, never committed
+docs/private/

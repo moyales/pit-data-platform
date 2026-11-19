@@ -79,3 +79,21 @@ One entry per design decision, written when the decision is made. Later entries 
 **Why.** The rename alone protects against the program crashing. After a power loss, the operating system can have saved the rename before the file contents, leaving a complete-looking folder with truncated files. The fsyncs close that gap for a few milliseconds per ingest.
 **Alternatives considered.** No fsync, with "all-or-nothing on program crash only" in the README: simpler, but weakens the main guarantee of the raw layer.
 **Limitation.** On macOS, `fsync` hands data to the drive but does not force the drive's own cache to disk (that needs `F_FULLFSYNC`). A power loss there can still, rarely, lose the last ingest's data.
+
+## D-014: A source table ends at the first blank line, and every line before it must be a data row
+**Decision.** `parse_ff3_daily` reads the lines between the header and the first blank line (or the end of the text). Each must be a valid data row, or parsing raises with the line number. Lines after the blank line are ignored. The header must appear exactly once.
+**Why.** The alternative rule, "stop at the first line that does not look like data", turns a corrupted row in the middle of the file into a silent truncation: every later row disappears and nothing fails. With a blank-line boundary, a bad row can only raise. The real file (checked 2026-11-18) has one blank line between the last row and the copyright notice.
+**Alternatives considered.** Stop at the first non-data line: tolerant of layout changes, but loses data silently. Read a fixed number of rows: breaks on every update.
+**Limitation.** If the source drops the blank line before the copyright notice, the ingest fails until the parser is updated. That is intended. The "header exactly once" rule fits the daily file only: monthly files repeat the same header for a second, annual table, so a monthly parser will need its own rule.
+
+## D-015: Values must match a plain decimal pattern before conversion
+**Decision.** Each value must match `-?digits(.digits)?` before it is converted with `float()`. Dates must be exactly eight digits and a real calendar date, checked with a regex and `date()`, not `strptime`.
+**Why.** `float()` accepts `"nan"`, `"inf"`, `"1e-3"` and `"1_000"`, and `strptime("%Y%m%d")` accepts unpadded dates such as `"2024112"`, which is ambiguous (Jan 12 or Nov 2?). None of these appear in the real file, so if one does, the layout has changed and the parser should fail, not guess.
+**Alternatives considered.** Plain `float()` and `strptime`: shorter, but each accepts inputs that are silently wrong.
+**Limitation.** Formats the source might legitimately adopt later (more decimals are fine; a leading `+` or scientific notation are not) need a parser change and a `PARSER_VERSION` bump.
+
+## D-016: Fixtures use the real layout with invented numbers, stored byte-exact
+**Decision.** `tests/fixtures/ff3_daily_sample.csv` copies the real file's layout (preamble, header, padding, CRLF line endings, blank line, copyright line) but its wording and all numbers are invented. `.gitattributes` marks `tests/fixtures/*` as `-text`, so git never converts their line endings, and a test checks that the CRLF endings are still there.
+**Why.** Tests must exercise the real format, including Windows line endings, without committing any vendor data. A git setting such as `core.autocrlf` could otherwise silently turn the fixture into an LF file, and the tests would stop covering the real case while still passing.
+**Alternatives considered.** A few real rows: closer to the source, but it is vendor data in the repo. Building all variants in code: no fixture to drift, but no byte-exact copy of the real layout.
+**Limitation.** The fixture matches the layout as checked on 2026-11-18; if the source changes, only the real ingest will notice.

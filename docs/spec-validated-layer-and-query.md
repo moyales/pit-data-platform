@@ -30,8 +30,10 @@ One pull request per task, or per pair of small tasks. Explain the approach befo
 ## 2. Knowledge-time derivation (`validated.py`)
 
 ```python
-def derive_records(ingests: Sequence[tuple[dict, pa.Table]], rule: LagRule) -> pa.Table
+def derive_records(ingests: Sequence[tuple[dict, pa.Table]], config: SourceConfig) -> pa.Table
 ```
+
+*Amended by D-026: the spec originally passed only a `LagRule`. `SourceConfig` holds the lag rule and the unit conversion, and each source declares its own.*
 
 - **Input:** every finished raw ingest of one source, as `(meta, table)` pairs, where the table is `read_ingest(path)`.
 - **Ordering:** the function sorts the input by `ingest_time` itself, and raises on two ingests with the same `ingest_time`.

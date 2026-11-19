@@ -21,8 +21,19 @@ import pyarrow as pa
 import requests
 
 from pitdata.raw import IngestResult, write_raw
+from pitdata.validated import LagRule, SourceConfig
 
 SOURCE = "ken_french"
+
+# How the validated layer treats this source (D-021, D-026):
+# - Backfilled history is assumed known by the end of the second month after the
+#   valid month. The one observed publication (2026-10-26, data through
+#   2026-09-30) had about 4 weeks of lag; this allows about 9. Too late is safe.
+# - Values are published in percent; the store holds decimals.
+VALIDATION = SourceConfig(
+    lag_rule=LagRule(name="ff_month_end_plus_2", version="1", months_after=2),
+    divide_by=100.0,
+)
 
 # Confirmed on the data library page on 2026-11-18.
 FF3_DAILY_URL = (

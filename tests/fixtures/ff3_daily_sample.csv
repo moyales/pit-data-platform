@@ -1,0 +1,14 @@
+Hand-made test fixture in the layout of the daily three-factor file.
+All numbers are invented. The real preamble is about this long and
+names the database vintage the file was built from.
+
+,Mkt-RF,SMB,HML,RF
+20240102,    0.25,   -0.31,    0.12,    0.02
+20240103,   -1.07,    0.44,   -0.05,    0.02
+20240104,    0.00,   -0.02,  -99.99,    0.02
+20240105,    2.31,    0.18,    0.67,    0.02
+20240108,   -0.09,    1.05,   -0.73,    0.02
+20240109,   10.42,   -2.50,    0.33, -999
+20240110,   -0.66,    0.07,    0.91,    0.02
+
+Copyright notice line, as in the real file

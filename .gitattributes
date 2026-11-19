@@ -1,0 +1,3 @@
+# Fixtures are byte-exact copies of a source layout (the Fama-French file uses
+# CRLF). Never let git convert their line endings.
+tests/fixtures/* -text

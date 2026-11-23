@@ -110,7 +110,7 @@ def get(series: str | Sequence[str], start: date, end: date, asof: datetime,
 def get_from(records: pa.Table, series, start, end, asof) -> pa.Table   # the core, on an in-memory table
 ```
 
-- **`asof`** must be a time-zone-aware UTC `datetime`; anything else raises `ValueError`. A plain date is refused because "as of 2024-01-02" could mean the start or the end of that day. That ambiguity is how off-by-one-day lookahead gets in.
+- **`asof`** must be a time-zone-aware UTC `datetime`. A naive or non-UTC datetime raises `ValueError`; a value of another type, such as a `date`, raises `TypeError` (amended by D-030). A plain date is refused because "as of 2024-01-02" could mean the start or the end of that day. That ambiguity is how off-by-one-day lookahead gets in.
 - **`start` and `end`** are inclusive dates. `end < start` raises.
 - **Result:** for each `(series_id, valid_date)` in range, the record with the greatest `knowledge_time <= asof`. Columns: `series_id`, `valid_date`, `value`, `knowledge_time`, `knowledge_basis`, `ingest_id`, sorted by `series_id`, `valid_date`.
   - If that record's value is null, the row is returned with a null value: we knew the value was missing.
@@ -133,6 +133,10 @@ def get_from(records: pa.Table, series, start, end, asof) -> pa.Table   # the co
 - Multiple series.
 - Naive, non-UTC and plain-date `asof` raise.
 - The result is the same whatever the machine's local time zone. The test sets `TZ` to a non-UTC zone.
+
+### Added during implementation: `pit get` (D-030)
+
+`pit get SERIES... --start YYYY-MM-DD --end YYYY-MM-DD --asof <UTC time with Z or +00:00> [--root data/validated]` prints the as-of result, one line per row.
 
 ## 5. Property tests (Hypothesis)
 

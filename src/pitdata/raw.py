@@ -19,7 +19,7 @@ import os
 import secrets
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
 from typing import Literal
@@ -31,7 +31,7 @@ import pyarrow.parquet as pq
 from pitdata._fs import fsync_dir as _fsync_dir
 from pitdata._fs import parquet_bytes as _parquet_bytes
 from pitdata._fs import write_durable as _write_durable
-from pitdata.schema import RAW_SCHEMA, SCHEMA_VERSION, SchemaError, validate
+from pitdata.schema import RAW_SCHEMA, SCHEMA_VERSION, SchemaError, require_utc, validate
 
 TMP_PREFIX = ".tmp-"
 META_FILE = "meta.json"
@@ -69,7 +69,7 @@ def write_raw(
     rewritten, so after a parser fix this is how a reader tells which ingests
     were parsed by the old code (D-012).
     """
-    _check_utc(ingest_time)
+    require_utc(ingest_time, "ingest_time")
     _check_plain_name(filename, "filename")
     _check_plain_name(content_name, "content_name")
     if not parser_version:
@@ -159,17 +159,6 @@ def list_ingests(root: Path, source: str) -> list[dict]:
 def read_ingest(path: Path) -> pa.Table:
     """Read an ingest folder's parsed table, re-validated against RAW_SCHEMA."""
     return validate(pq.read_table(path / PARSED_FILE), RAW_SCHEMA)
-
-
-def _check_utc(ingest_time: datetime) -> None:
-    # tzname() == "UTC" also rejects zones that only happen to be at offset 0
-    # today (e.g. Europe/London in winter), which would be wrong in summer.
-    if (
-        ingest_time.tzinfo is None
-        or ingest_time.utcoffset() != timedelta(0)
-        or ingest_time.tzname() != "UTC"
-    ):
-        raise ValueError(f"ingest_time must be time-zone-aware UTC, got {ingest_time!r}")
 
 
 def _check_plain_name(name: str, what: str) -> None:

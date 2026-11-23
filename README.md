@@ -6,11 +6,11 @@ A point-in-time research data store for daily market data. It answers one questi
 
 A backtest that uses numbers nobody had yet (a GDP figure before it was published, a factor return after it was restated) looks better than anything you could have traded. This is lookahead bias. pitdata stores every value with *when it could first have been known*, so a query as of any past date sees only what was knowable then.
 
-> **Status: work in progress.** Fama-French works end to end: ingest, knowledge-time derivation and as-of queries. The append-invariance property tests and quality checks are next. See [Roadmap](#roadmap).
+> **Status: work in progress.** Fama-French works end to end: ingest, knowledge-time derivation and as-of queries, with property tests for the guarantees below. Quality checks are next. See [Roadmap](#roadmap).
 
 ## The idea in three sentences
 
-Every value carries two timestamps: `valid_date`, the period it describes, and `knowledge_time` (UTC), when it could first have been known. A value is visible as of T if and only if `knowledge_time <= T`, and a restated value is a new row with a later knowledge time, never an overwrite. The key guarantee, to be tested directly with property tests (next on the roadmap): adding data learned after T never changes an answer as of T.
+Every value carries two timestamps: `valid_date`, the period it describes, and `knowledge_time` (UTC), when it could first have been known. A value is visible as of T if and only if `knowledge_time <= T`, and a restated value is a new row with a later knowledge time, never an overwrite. The key guarantee, tested directly with property tests on random ingest histories: adding data learned after T never changes an answer as of T.
 
 This is called *bitemporal* modelling. Every record also says whether its knowledge time was **observed** (seen at or near publication) or **assumed** (set by a documented lag rule for history loaded after the fact), so approximations stay visible in the data.
 
@@ -89,19 +89,19 @@ uv run pytest                       # no test touches the network
 |---|---|---|
 | **Raw** | What each source file said and when it was fetched. Never edited. | Done |
 | **Validated** | Typed records with derived `knowledge_time`, unit conversions (e.g. percent to decimal) and quality checks. Rebuilt from raw at any time. | Done, except quality checks |
-| **Query** | `get(series, start, end, asof)` over Parquet with DuckDB. | Done; property tests next |
+| **Query** | `get(series, start, end, asof)` over Parquet with DuckDB. | Done |
 
 Some design choices worth knowing:
 
 - **Raw stores observations only.** Knowledge time is an inference ("first seen in ingest X", or "assumed by a lag rule"). It is computed in the validated layer by replaying ingests in order, so the rule can change without re-downloading anything.
 - **Parsers are pure functions** (text in, table out), tested with small hand-made fixtures. Download and archive handling stay thin.
 - **The clock and the downloader are passed in as arguments.** Tests replay exact sequences of ingests without a network.
+- **The guarantees are property-tested.** Hypothesis generates random ingest histories (restatements, reversions, nulls, missing rows) and checks at boundary query times that later data never changes an earlier answer, that nothing known after T is returned, that later ingests never rewrite earlier records, and that the query matches the as-of rule written in plain Python. Each of these checks has been shown to fail when the code is deliberately broken.
 
 Every decision, with alternatives and limitations, is in [`docs/design-notes.md`](docs/design-notes.md). Specifications: [`docs/spec-raw-layer-and-ff-ingest.md`](docs/spec-raw-layer-and-ff-ingest.md) (raw layer and ingest) and [`docs/spec-validated-layer-and-query.md`](docs/spec-validated-layer-and-query.md) (validated layer and query, current).
 
 ## Roadmap
 
-- **Property tests (Hypothesis)** for append-invariance, no leaks and causality over random sequences of ingests.
 - **Data-quality checks** against a historical exchange calendar.
 - **Daily ETF prices**, stored unadjusted, with split and dividend factors kept separately and adjusted prices computed as of a date.
 - **Macro series with real revision history** (ALFRED), where knowledge times are observed vintages rather than assumptions.
@@ -144,6 +144,11 @@ This is a personal research project built on free data. Free data has no accurac
 - **`asof` must be an explicit UTC time.** A date, a time without a zone, or another zone is refused rather than interpreted (D-024, D-030).
 - **An unknown series returns no rows, not an error.** "No such series" and "not known yet" look the same to the query.
 - **Every query lists and schema-checks all validated files.** Cheap for a few sources; it grows with their number (D-029).
+
+### Testing
+- **Property tests search a small world thoroughly.** Two series, four dates, up to six ingests, four values. They are evidence, not proof (D-032).
+- **They check the store's promises given its lag rule,** not that the lag rule matches when a source really published.
+- **Queries share one in-memory DuckDB database per process,** each in its own session (D-031). This relies on DuckDB keeping sessions separate, which a test checks.
 
 ### Data
 - **A layout change at the source stops the Fama-French ingest** until the parser is updated. The parser fails on anything unexpected instead of guessing (D-014, D-015).

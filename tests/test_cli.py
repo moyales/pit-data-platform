@@ -125,3 +125,88 @@ def test_build_with_unregistered_raw_folder_exits_nonzero(tmp_path, use_fetch):
 
     only = run_build(raw, tmp_path / "validated", "--source", "ken_french")
     assert only.exit_code == 0, only.output
+
+
+# --- pit get ---------------------------------------------------------------------
+
+
+def test_get_prints_rows_known_as_of(tmp_path, use_fetch):
+    use_fetch(lambda url: fixture_zip())
+    raw, out = tmp_path / "raw", tmp_path / "validated"
+    assert run(raw).exit_code == 0
+    assert run_build(raw, out).exit_code == 0
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "get",
+            "FF3_DAILY.MKT_RF",
+            "--start",
+            "2024-01-02",
+            "--end",
+            "2024-01-03",
+            "--asof",
+            "2024-05-01T00:00Z",
+            "--root",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[0].split() == [
+        "2024-01-02",
+        "FF3_DAILY.MKT_RF",
+        "0.0025",
+        "2024-04-01T00:00:00Z",
+        "assumed",
+    ]
+    assert lines[1].split()[2] == "-0.0107"
+    assert lines[-1] == "2 rows known as of 2024-05-01T00:00Z"
+
+
+@pytest.mark.parametrize(
+    ("asof", "message"),
+    [
+        ("2024-05-01T00:00", "asof must be time-zone-aware UTC"),  # no zone
+        ("2024-05-01", "asof must be time-zone-aware UTC"),  # a date, parsed as naive midnight
+        ("2024-05-01T00:00+05:00", "asof must be time-zone-aware UTC"),
+    ],
+)
+def test_get_rejects_asof_without_explicit_utc(tmp_path, asof, message):
+    result = runner.invoke(
+        cli.app,
+        [
+            "get",
+            "X",
+            "--start",
+            "2024-01-02",
+            "--end",
+            "2024-01-03",
+            "--asof",
+            asof,
+            "--root",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert message in result.output
+
+
+def test_get_without_build_says_so(tmp_path):
+    result = runner.invoke(
+        cli.app,
+        [
+            "get",
+            "X",
+            "--start",
+            "2024-01-02",
+            "--end",
+            "2024-01-03",
+            "--asof",
+            "2024-05-01T00:00Z",
+            "--root",
+            str(tmp_path / "validated"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "run `pit build` first" in result.output

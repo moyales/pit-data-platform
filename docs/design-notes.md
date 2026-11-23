@@ -157,3 +157,15 @@ One entry per design decision, written when the decision is made. Later entries 
 **Why.** The publication lag and the units are facts about the source, and they belong next to the parser that knows the file. New sources (ETF prices, ALFRED) bring their own config without changing the validated layer. Dividing by 100 rounds once; `0.01` has no exact binary form, so multiplying by it rounds twice.
 **Alternatives considered.** A registry of sources inside `validated.py`: centralises knowledge about every source in one module. Passing the rule and the conversion as separate arguments: works, but every caller has to keep them paired.
 **Limitation.** One lag rule and one conversion per source, applied to every series in it. A source whose series publish on different schedules will need a per-series rule.
+
+## D-027: Build provenance is stored inside each validated file's Parquet metadata
+**Decision.** `pit build` writes a `pitdata_build` key into each validated file's Parquet key-value metadata, holding the source, the lag rule (name, version, months), `divide_by`, the raw ingest ids in time order, the pitdata version, and the record and restated-key counts. No build time is recorded. `read_build_info(path)` returns it; DuckDB can read it with `parquet_kv_metadata`.
+**Why.** A validated file means nothing without knowing which rule and which raw ingests produced it. Stored inside the file, the provenance is replaced in the same atomic step as the data, so the two can never disagree. These inputs fully determine the content, so a build time would add no explanation and would make builds non-deterministic.
+**Alternatives considered.** A sidecar `<source>.build.json`: easier to open by hand, but a second file that a crash or a manual copy can separate from the data. Recording the build time: needs the clock injected into the build and makes two builds of the same raw data differ.
+**Limitation.** The provenance is invisible without a Parquet-aware tool. The list of ingest ids grows by one per changed ingest, which is a few kilobytes even after years of daily ingests.
+
+## D-028: A raw source with no registered config fails the build
+**Decision.** `pitdata/sources/__init__.py` lists every source's `SourceConfig` in `CONFIGS`. If any folder under `data/raw/` is not in it, `pit build` raises before writing anything. `pit build --source <name>` builds one source regardless of the others.
+**Why.** A raw folder the code does not know about is a mismatch between data and code, and the project's rule is to fail loudly on mismatches. Checking every source before writing means a failed build changes nothing.
+**Alternatives considered.** Skipping unknown folders with a warning: the other sources still build, but a missing config can go unnoticed for a long time.
+**Limitation.** One unregistered folder blocks a full build until it is registered or `--source` is used.

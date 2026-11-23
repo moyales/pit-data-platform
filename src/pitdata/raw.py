@@ -27,6 +27,10 @@ from typing import Literal
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+# Imported under private names so tests can still patch raw._parquet_bytes.
+from pitdata._fs import fsync_dir as _fsync_dir
+from pitdata._fs import parquet_bytes as _parquet_bytes
+from pitdata._fs import write_durable as _write_durable
 from pitdata.schema import RAW_SCHEMA, SCHEMA_VERSION, SchemaError, validate
 
 TMP_PREFIX = ".tmp-"
@@ -192,31 +196,3 @@ def _stamp(parsed: pa.Table, source: str, ingest_time: datetime, ingest_id: str)
     return parsed.append_column(
         "ingest_time", pa.array([ingest_time] * n, type=ts_type)
     ).append_column("ingest_id", pa.array([ingest_id] * n, type=pa.string()))
-
-
-def _parquet_bytes(table: pa.Table) -> bytes:
-    # Serialise in memory so every file goes through the same durable write.
-    sink = pa.BufferOutputStream()
-    pq.write_table(table, sink)
-    return sink.getvalue().to_pybytes()
-
-
-def _write_durable(path: Path, data: bytes) -> None:
-    """Write `data` and fsync it, so the rename never publishes unflushed bytes.
-
-    Without the fsync, a power loss can leave a renamed, complete-looking
-    folder holding truncated files (D-013).
-    """
-    with open(path, "xb") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
-
-
-def _fsync_dir(path: Path) -> None:
-    # Flushes the folder's list of entries (new files, a rename) to disk.
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)

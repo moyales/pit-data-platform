@@ -21,7 +21,7 @@ from datetime import UTC, date, datetime
 import duckdb
 import pyarrow as pa
 
-from pitdata.schema import RAW_SCHEMA, RECORD_SCHEMA, validate
+from pitdata.schema import RAW_SCHEMA, RECORD_SCHEMA, require_utc, validate
 
 
 @dataclass(frozen=True)
@@ -178,6 +178,4 @@ def _check_and_tag(ingests: Sequence[tuple[dict, pa.Table]]) -> list[pa.Table]:
 
 def _ingest_time(meta: dict) -> datetime:
     time = datetime.fromisoformat(meta["ingest_time"])
-    if time.tzinfo is None or time.utcoffset() != UTC.utcoffset(None):
-        raise ValueError(f"ingest {meta['ingest_id']}: ingest_time must be UTC, got {time}")
-    return time
+    return require_utc(time, f"ingest {meta['ingest_id']}: ingest_time")

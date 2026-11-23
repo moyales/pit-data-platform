@@ -1,9 +1,10 @@
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 import pyarrow as pa
 import pytest
 
-from pitdata.schema import RAW_SCHEMA, RECORD_SCHEMA, SchemaError, validate
+from pitdata.schema import RAW_SCHEMA, RECORD_SCHEMA, SchemaError, require_utc, validate
 
 UTC_US = pa.timestamp("us", tz="UTC")
 
@@ -154,3 +155,31 @@ def test_raw_table_is_rejected_by_default_record_schema():
     # The default schema fails safe: forgetting to pass RAW_SCHEMA raises.
     with pytest.raises(SchemaError, match=r"missing=\['knowledge_basis', 'knowledge_time'\]"):
         validate(make_raw_table())
+
+
+# --- require_utc -----------------------------------------------------------------
+
+
+def test_require_utc_accepts_utc_datetimes():
+    for tz in (UTC, ZoneInfo("UTC")):
+        value = datetime(2026, 11, 23, tzinfo=tz)
+        assert require_utc(value, "t") is value
+
+
+@pytest.mark.parametrize(
+    "zone",
+    ["America/New_York", "Europe/London"],  # London is at offset 0 in winter, but is not UTC
+)
+def test_require_utc_rejects_other_zones(zone):
+    with pytest.raises(ValueError, match="asof must be time-zone-aware UTC"):
+        require_utc(datetime(2026, 1, 13, tzinfo=ZoneInfo(zone)), "asof")
+
+
+def test_require_utc_rejects_naive_datetimes():
+    with pytest.raises(ValueError, match="UTC"):
+        require_utc(datetime(2026, 1, 13), "asof")  # noqa: DTZ001 - naive on purpose
+
+
+def test_require_utc_rejects_dates_with_type_error():
+    with pytest.raises(TypeError, match="asof must be a datetime, got date"):
+        require_utc(date(2026, 1, 13), "asof")

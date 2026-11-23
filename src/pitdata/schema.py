@@ -11,6 +11,8 @@ as one row in a long-format schema. There are two:
 Every writer must pass its table through `validate()` before anything reaches disk.
 """
 
+from datetime import datetime, timedelta
+
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -157,3 +159,22 @@ def _check_knowledge_not_before_valid(table: pa.Table) -> None:
     n_bad = pc.sum(pc.cast(too_early, pa.int64())).as_py() or 0
     if n_bad:
         raise SchemaError(f"{n_bad} row(s) have knowledge_time before valid_date")
+
+
+def require_utc(value: object, name: str) -> datetime:
+    """Return `value` if it is a time-zone-aware UTC datetime.
+
+    Raises TypeError for anything that is not a datetime, and ValueError for a
+    naive or non-UTC datetime.
+
+    The project's single definition of "UTC" for Python values. tzname() == "UTC"
+    also rejects zones that only happen to be at offset 0 today (Europe/London in
+    winter), which would be an hour off in summer. A `date` is rejected too:
+    "as of 2024-01-02" could mean the start or the end of that day.
+    """
+    if not isinstance(value, datetime):
+        # Wrong type -> TypeError; right type but not UTC -> ValueError.
+        raise TypeError(f"{name} must be a datetime, got {type(value).__name__} {value!r}")
+    if value.tzinfo is None or value.utcoffset() != timedelta(0) or value.tzname() != "UTC":
+        raise ValueError(f"{name} must be time-zone-aware UTC, got {value!r}")
+    return value

@@ -6,11 +6,11 @@ A point-in-time research data store for daily market data. It answers one questi
 
 A backtest that uses numbers nobody had yet (a GDP figure before it was published, a factor return after it was restated) looks better than anything you could have traded. This is lookahead bias. pitdata stores every value with *when it could first have been known*, so a query as of any past date sees only what was knowable then.
 
-> **Status: work in progress.** The raw layer and the Fama-French ingest work end to end. The validated layer, which derives knowledge time, and the as-of query API are next. See [Roadmap](#roadmap).
+> **Status: work in progress.** Fama-French works end to end: ingest, knowledge-time derivation and as-of queries. The append-invariance property tests and quality checks are next. See [Roadmap](#roadmap).
 
 ## The idea in three sentences
 
-Every value carries two timestamps: `valid_date`, the period it describes, and `knowledge_time` (UTC), when it could first have been known. A value is visible as of T if and only if `knowledge_time <= T`, and a restated value is a new row with a later knowledge time, never an overwrite. The key guarantee, to be tested directly: adding data learned after T never changes an answer as of T.
+Every value carries two timestamps: `valid_date`, the period it describes, and `knowledge_time` (UTC), when it could first have been known. A value is visible as of T if and only if `knowledge_time <= T`, and a restated value is a new row with a later knowledge time, never an overwrite. The key guarantee, to be tested directly with property tests (next on the roadmap): adding data learned after T never changes an answer as of T.
 
 This is called *bitemporal* modelling. Every record also says whether its knowledge time was **observed** (seen at or near publication) or **assumed** (set by a documented lag rule for history loaded after the fact), so approximations stay visible in the data.
 
@@ -18,10 +18,35 @@ This is called *bitemporal* modelling. Every record also says whether its knowle
 
 ```console
 $ uv run pit ingest ff
-written 105,352 rows (ingest 20261119T044133Z_3f7910502dd6)
+written 105,352 rows (ingest 20261123T213237Z_3f7910502dd6)
 $ uv run pit ingest ff
-unchanged, matches ingest 20261119T044133Z_3f7910502dd6
+unchanged, matches ingest 20261123T213237Z_3f7910502dd6
+$ uv run pit build
+ken_french: 105,352 records, 0 restated keys, from 1 ingest -> data/validated/ken_french.parquet
 ```
+
+Then ask what was known about the market factor around the end of August 2026, at three points in time:
+
+```console
+$ uv run pit get FF3_DAILY.MKT_RF --start 2026-08-28 --end 2026-09-02 --asof 2026-09-01T00:00Z
+0 rows known as of 2026-09-01T00:00Z
+
+$ uv run pit get FF3_DAILY.MKT_RF --start 2026-08-28 --end 2026-09-02 --asof 2026-11-01T00:00Z
+2026-08-28  FF3_DAILY.MKT_RF            -0.0034  2026-11-01T00:00:00Z  assumed
+2026-08-31  FF3_DAILY.MKT_RF            -0.0033  2026-11-01T00:00:00Z  assumed
+2 rows known as of 2026-11-01T00:00Z
+
+$ uv run pit get FF3_DAILY.MKT_RF --start 2026-08-28 --end 2026-09-02 --asof 2026-12-01T00:00Z
+2026-08-28  FF3_DAILY.MKT_RF            -0.0034  2026-11-01T00:00:00Z  assumed
+2026-08-31  FF3_DAILY.MKT_RF            -0.0033  2026-11-01T00:00:00Z  assumed
+2026-09-01  FF3_DAILY.MKT_RF            -0.0081  2026-11-23T21:32:37Z  observed
+2026-09-02  FF3_DAILY.MKT_RF              0.005  2026-11-23T21:32:37Z  observed
+4 rows known as of 2026-12-01T00:00Z
+```
+
+August's values were in the first download, so their knowledge time comes from a conservative lag rule and is marked `assumed`. September's values were downloaded before the rule's date, so the download time itself is used and marked `observed`. Values are decimals (−0.0034 is −0.34%).
+
+From Python, `pitdata.query.get(series, start, end, asof)` returns the same result as an Arrow table; `asof` must be a time-zone-aware UTC `datetime`.
 
 - **Fama-French daily three factors** (Mkt-RF, SMB, HML, RF, 1926 onwards) downloaded from the Kenneth R. French Data Library and parsed into long format.
 - **An append-only raw layer.** Each ingest is one immutable folder holding the download byte for byte, the extracted file, the parsed table and a `meta.json`:
@@ -54,6 +79,7 @@ cd pit-data-platform
 uv sync
 uv run pit ingest ff                # writes to data/raw/ (git-ignored)
 uv run pit build                    # derives data/validated/ from data/raw/
+uv run pit get FF3_DAILY.MKT_RF --start 2024-01-02 --end 2024-01-31 --asof 2026-12-01T00:00Z
 uv run pytest                       # no test touches the network
 ```
 
@@ -62,8 +88,8 @@ uv run pytest                       # no test touches the network
 | Layer | Holds | Status |
 |---|---|---|
 | **Raw** | What each source file said and when it was fetched. Never edited. | Done |
-| **Validated** | Typed records with derived `knowledge_time`, unit conversions (e.g. percent to decimal) and quality checks. Rebuilt from raw at any time. | Next |
-| **Query** | `get(series, start, end, asof)` over Parquet with DuckDB. | Next |
+| **Validated** | Typed records with derived `knowledge_time`, unit conversions (e.g. percent to decimal) and quality checks. Rebuilt from raw at any time. | Done, except quality checks |
+| **Query** | `get(series, start, end, asof)` over Parquet with DuckDB. | Done; property tests next |
 
 Some design choices worth knowing:
 
@@ -71,12 +97,11 @@ Some design choices worth knowing:
 - **Parsers are pure functions** (text in, table out), tested with small hand-made fixtures. Download and archive handling stay thin.
 - **The clock and the downloader are passed in as arguments.** Tests replay exact sequences of ingests without a network.
 
-Every decision, with alternatives and limitations, is in [`docs/design-notes.md`](docs/design-notes.md). The current specification is [`docs/spec-raw-layer-and-ff-ingest.md`](docs/spec-raw-layer-and-ff-ingest.md).
+Every decision, with alternatives and limitations, is in [`docs/design-notes.md`](docs/design-notes.md). Specifications: [`docs/spec-raw-layer-and-ff-ingest.md`](docs/spec-raw-layer-and-ff-ingest.md) (raw layer and ingest) and [`docs/spec-validated-layer-and-query.md`](docs/spec-validated-layer-and-query.md) (validated layer and query, current).
 
 ## Roadmap
 
-- **Validated layer:** knowledge-time derivation (observed vs assumed), unit conversion, rebuild from raw.
-- **Query API:** `get(series, start, end, asof)` with DuckDB, and a property test (Hypothesis) proving append-invariance.
+- **Property tests (Hypothesis)** for append-invariance, no leaks and causality over random sequences of ingests.
 - **Data-quality checks** against a historical exchange calendar.
 - **Daily ETF prices**, stored unadjusted, with split and dividend factors kept separately and adjusted prices computed as of a date.
 - **Macro series with real revision history** (ALFRED), where knowledge times are observed vintages rather than assumptions.
@@ -115,8 +140,10 @@ This is a personal research project built on free data. Free data has no accurac
 - **Rebuilt in full, not versioned.** `pit build` replaces `data/validated/<source>.parquet` each time. Each file records the lag rule, conversion and raw ingest ids that produced it (D-027), but results from before a rule change cannot be reproduced unless the old file was kept.
 - **One unregistered raw folder blocks a full build** (D-028). Use `pit build --source <name>` to build the others.
 
-### Query (to come)
-- DuckDB shows UTC timestamps in the machine's local time zone unless the connection runs `SET TimeZone = 'UTC'`. The stored values are UTC either way; the query layer must set this so results never appear in local time.
+### Query
+- **`asof` must be an explicit UTC time.** A date, a time without a zone, or another zone is refused rather than interpreted (D-024, D-030).
+- **An unknown series returns no rows, not an error.** "No such series" and "not known yet" look the same to the query.
+- **Every query lists and schema-checks all validated files.** Cheap for a few sources; it grows with their number (D-029).
 
 ### Data
 - **A layout change at the source stops the Fama-French ingest** until the parser is updated. The parser fails on anything unexpected instead of guessing (D-014, D-015).

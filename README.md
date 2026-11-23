@@ -53,6 +53,7 @@ git clone https://github.com/moyales/pit-data-platform.git
 cd pit-data-platform
 uv sync
 uv run pit ingest ff                # writes to data/raw/ (git-ignored)
+uv run pit build                    # derives data/validated/ from data/raw/
 uv run pytest                       # no test touches the network
 ```
 
@@ -109,6 +110,10 @@ This is a personal research project built on free data. Free data has no accurac
 - **Fixed size caps** of 20 MB per download and 50 MB per extracted file (D-018). A source that legitimately grows past them needs a code change.
 - **Strict UTF-8 decoding** (D-017). A source that changes encoding stops the ingest until the code is updated.
 - **`meta.json` records the requested URL**, not the final URL after any redirect.
+
+### Validated layer
+- **Rebuilt in full, not versioned.** `pit build` replaces `data/validated/<source>.parquet` each time. Each file records the lag rule, conversion and raw ingest ids that produced it (D-027), but results from before a rule change cannot be reproduced unless the old file was kept.
+- **One unregistered raw folder blocks a full build** (D-028). Use `pit build --source <name>` to build the others.
 
 ### Query (to come)
 - DuckDB shows UTC timestamps in the machine's local time zone unless the connection runs `SET TimeZone = 'UTC'`. The stored values are UTC either way; the query layer must set this so results never appear in local time.

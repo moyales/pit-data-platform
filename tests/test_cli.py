@@ -86,3 +86,42 @@ def test_parse_failure_exits_nonzero_with_the_error(tmp_path, use_fetch):
     result = run(tmp_path)
     assert result.exit_code == 1
     assert "error: download is not a zip archive" in result.output
+
+
+# --- pit build -------------------------------------------------------------------
+
+
+def run_build(raw: Path, out: Path, *extra: str):
+    return runner.invoke(cli.app, ["build", "--raw", str(raw), "--out", str(out), *extra])
+
+
+def test_build_after_ingest_prints_one_line_per_source(tmp_path, use_fetch):
+    use_fetch(lambda url: fixture_zip())
+    raw, out = tmp_path / "raw", tmp_path / "validated"
+    assert run(raw).exit_code == 0
+
+    result = run_build(raw, out)
+    assert result.exit_code == 0, result.output
+    assert result.output == (
+        f"ken_french: 28 records, 0 restated keys, from 1 ingest -> {out / 'ken_french.parquet'}\n"
+    )
+
+
+def test_build_with_no_raw_data_says_so(tmp_path):
+    result = run_build(tmp_path / "raw", tmp_path / "validated")
+    assert result.exit_code == 0
+    assert result.output.startswith("nothing to build")
+
+
+def test_build_with_unregistered_raw_folder_exits_nonzero(tmp_path, use_fetch):
+    use_fetch(lambda url: fixture_zip())
+    raw = tmp_path / "raw"
+    assert run(raw).exit_code == 0
+    (raw / "fred").mkdir()
+
+    result = run_build(raw, tmp_path / "validated")
+    assert result.exit_code == 1
+    assert "error: raw folders with no registered config: ['fred']" in result.output
+
+    only = run_build(raw, tmp_path / "validated", "--source", "ken_french")
+    assert only.exit_code == 0, only.output

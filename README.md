@@ -6,7 +6,7 @@ A point-in-time research data store for daily market data. It answers one questi
 
 A backtest that uses numbers nobody had yet (a GDP figure before it was published, a factor return after it was restated) looks better than anything you could have traded. This is lookahead bias. pitdata stores every value with *when it could first have been known*, so a query as of any past date sees only what was knowable then.
 
-> **Status: work in progress.** Fama-French works end to end: ingest, knowledge-time derivation and as-of queries, with property tests for the guarantees below and a data-quality report on every build. See [Roadmap](#roadmap).
+> **Status: work in progress: one of three planned sources.** Fama-French factors work end to end. That covers ingest, knowledge-time derivation and as-of queries, with property tests for the guarantees below and a data-quality report on every build. Macro series with real revision history and daily ETF prices are not built yet. See [Status against the v1 goals](#status-against-the-v1-goals).
 
 ## The idea in three sentences
 
@@ -108,10 +108,24 @@ Some design choices worth knowing:
 
 Every decision, with alternatives and limitations, is in [`docs/design-notes.md`](docs/design-notes.md). Specifications: [`docs/spec-raw-layer-and-ff-ingest.md`](docs/spec-raw-layer-and-ff-ingest.md) (raw layer and ingest) and [`docs/spec-validated-layer-and-query.md`](docs/spec-validated-layer-and-query.md) (validated layer and query, current).
 
+## Status against the v1 goals
+
+| Goal | Status |
+|---|---|
+| Raw, validated and query layers; one command rebuilds the store from raw | Done |
+| Fama-French daily factors | Done |
+| Macro series with real revision history (ALFRED) | Not started: **next** |
+| Daily ETF prices, unadjusted, with split and dividend factors and adjusted prices computed as of a date | Not started; data sources being researched first |
+| Property tests, including append-invariance | Done, for the one source |
+| Data-quality checks | Missing sessions, unexpected dates, duplicate keys, nulls, implausible values, restatement bursts. Not yet: stale prices and one-day returns, which need prices |
+| CI: lint, format, unit and property tests | Done |
+
+**What this means in practice.** Every rule is tested, but Fama-French publishes only its current file, so all history loaded so far has *assumed* knowledge times. The store has not yet held a real revision. ALFRED comes next for that reason: it publishes every past vintage of a macro series, so revisions can be queried on real data rather than only in tests.
+
 ## Roadmap
 
-- **Daily ETF prices**, stored unadjusted, with split and dividend factors kept separately and adjusted prices computed as of a date.
-- **Macro series with real revision history** (ALFRED), where knowledge times are observed vintages rather than assumptions.
+1. **Macro series with real revision history** (ALFRED). Knowledge times come from published vintage dates rather than from a lag rule.
+2. **Daily ETF prices**, stored unadjusted, with split and dividend factors kept separately and adjusted prices computed as of a date. This starts with a written survey of free sources, because many free price feeds are already adjusted.
 
 Out of scope for v1: intraday data, fundamentals, a web UI, cloud deployment and scheduling.
 
@@ -145,6 +159,8 @@ This is a personal research project built on free data. Free data has no accurac
 
 ### Validated layer
 - **Rebuilt in full, not versioned.** `pit build` replaces `data/validated/<source>.parquet` each time. Each file records the lag rule, conversion and raw ingest ids that produced it (D-027), but results from before a rule change cannot be reproduced unless the old file was kept.
+- **The Fama-French lag rule is calibrated on one observed publication date** (data through 2026-09-30, published around 2026-10-26). It is deliberately generous; more observed publications would tighten it.
+- **Two changes between ingests appear as one.** Restatements are detected by comparing consecutive ingests, so their timing is only as fine as the ingest schedule.
 - **One unregistered raw folder blocks a full build** (D-028). Use `pit build --source <name>` to build the others.
 - **Quality checks warn; they never stop a build** (D-034). Nothing reads `<source>.quality.json` automatically.
 - **The table and its quality report are replaced in two steps.** A crash in between leaves a report describing older ingests; its `describes` field makes that detectable.

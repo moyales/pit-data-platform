@@ -6,7 +6,7 @@ A point-in-time research data store for daily market data. It answers one questi
 
 A backtest that uses numbers nobody had yet (a GDP figure before it was published, a factor return after it was restated) looks better than anything you could have traded. This is lookahead bias. pitdata stores every value with *when it could first have been known*, so a query as of any past date sees only what was knowable then.
 
-> **Status: work in progress.** Fama-French works end to end: ingest, knowledge-time derivation and as-of queries, with property tests for the guarantees below. Quality checks are next. See [Roadmap](#roadmap).
+> **Status: work in progress.** Fama-French works end to end: ingest, knowledge-time derivation and as-of queries, with property tests for the guarantees below and a data-quality report on every build. See [Roadmap](#roadmap).
 
 ## The idea in three sentences
 
@@ -62,6 +62,14 @@ From Python, `pitdata.query.get(series, start, end, asof)` returns the same resu
 - **Idempotent ingest.** A re-run with unchanged data writes nothing, because the extracted content is compared by SHA-256 hash. The zip itself is not compared: zips store timestamps, so identical data can arrive in different bytes.
 - **All-or-nothing writes.** Files are written to a temporary folder, flushed to disk, then renamed into place in one step.
 - **Strict validation.** One schema module, no silent coercion. Naive timestamps, unexpected headers, malformed numbers and corrupted archives raise errors.
+- **A data-quality report on every build.** `pit build` also writes `data/validated/<source>.quality.json`. Its checks warn but never stop the build:
+  - dates against a historical NYSE calendar, including the Saturday sessions before 1952;
+  - restatements per ingest;
+  - nulls;
+  - outliers;
+  - the largest gaps.
+
+  On the real file every check passes, and the largest gap found is the 1933 bank holiday. If the percent-to-decimal conversion is forgotten, 44,972 records are flagged as outliers.
 - **Queryable with DuckDB as-is:**
 
   ```sql
@@ -88,7 +96,7 @@ uv run pytest                       # no test touches the network
 | Layer | Holds | Status |
 |---|---|---|
 | **Raw** | What each source file said and when it was fetched. Never edited. | Done |
-| **Validated** | Typed records with derived `knowledge_time`, unit conversions (e.g. percent to decimal) and quality checks. Rebuilt from raw at any time. | Done, except quality checks |
+| **Validated** | Typed records with derived `knowledge_time`, unit conversions (e.g. percent to decimal) and quality checks. Rebuilt from raw at any time. | Done |
 | **Query** | `get(series, start, end, asof)` over Parquet with DuckDB. | Done |
 
 Some design choices worth knowing:
@@ -102,7 +110,6 @@ Every decision, with alternatives and limitations, is in [`docs/design-notes.md`
 
 ## Roadmap
 
-- **Data-quality checks** against a historical exchange calendar.
 - **Daily ETF prices**, stored unadjusted, with split and dividend factors kept separately and adjusted prices computed as of a date.
 - **Macro series with real revision history** (ALFRED), where knowledge times are observed vintages rather than assumptions.
 
@@ -139,6 +146,10 @@ This is a personal research project built on free data. Free data has no accurac
 ### Validated layer
 - **Rebuilt in full, not versioned.** `pit build` replaces `data/validated/<source>.parquet` each time. Each file records the lag rule, conversion and raw ingest ids that produced it (D-027), but results from before a rule change cannot be reproduced unless the old file was kept.
 - **One unregistered raw folder blocks a full build** (D-028). Use `pit build --source <name>` to build the others.
+- **Quality checks warn; they never stop a build** (D-034). Nothing reads `<source>.quality.json` automatically.
+- **The table and its quality report are replaced in two steps.** A crash in between leaves a report describing older ingests; its `describes` field makes that detectable.
+- **One outlier bound per source** (0.25 for Fama-French) catches unit errors, not a bad risk-free rate value.
+- **The NYSE calendar comes from `pandas_market_calendars`** (D-033). It matches the real Fama-French file on every date since 1926, which shows the two are consistent, not that either is right.
 
 ### Query
 - **`asof` must be an explicit UTC time.** A date, a time without a zone, or another zone is refused rather than interpreted (D-024, D-030).
@@ -153,7 +164,7 @@ This is a personal research project built on free data. Free data has no accurac
 ### Data
 - **A layout change at the source stops the Fama-French ingest** until the parser is updated. The parser fails on anything unexpected instead of guessing (D-014, D-015).
 - **Fama-French history before the first ingest is not true point-in-time.** It is the current vintage, with knowledge time from an assumed lag rule and marked `knowledge_basis = "assumed"`. Restatements made before the first ingest are invisible.
-- **Early Fama-French data includes Saturdays** (the NYSE traded on Saturdays until 1952). Calendar checks must use a historical exchange calendar, not Monday to Friday.
+- **Early Fama-French data includes Saturdays** (the NYSE traded on Saturdays until 1952). The calendar check uses a historical NYSE calendar that includes them (D-033).
 
 ## License
 

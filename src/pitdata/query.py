@@ -12,10 +12,10 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
-import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from pitdata._duckdb import session
 from pitdata.schema import RECORD_SCHEMA, require_utc, validate
 
 DEFAULT_ROOT = Path("data/validated")
@@ -117,14 +117,11 @@ def _run(
     asof: datetime,
     register: pa.Table | None,
 ) -> pa.Table:
-    # A private connection: TimeZone must not leak to or from other DuckDB users.
-    con = duckdb.connect()
-    try:
-        # Defensive, not load-bearing today: every comparison here is instant vs
-        # instant or date vs date, and the final cast labels the timestamps UTC.
-        # It protects any future expression that mixes dates and timestamps,
-        # which would otherwise use the machine's local zone (see derive_records).
-        con.execute("SET TimeZone = 'UTC'")
+    # A private session (D-031). Its UTC setting is defensive here, not
+    # load-bearing: every comparison is instant vs instant or date vs date, and
+    # the final cast labels the timestamps UTC. It protects any future
+    # expression that mixes dates and timestamps (see derive_records).
+    with session() as con:
         if register is not None:
             con.register("records", register)
         scope = {**params, "series": series, "start": start, "end": end}
@@ -132,8 +129,6 @@ def _run(
         if ties:
             raise QueryError(f"records with the same key and knowledge_time: {ties}")
         result = con.sql(prefix + _AS_OF_SQL, params={**scope, "asof": asof}).to_arrow_table()
-    finally:
-        con.close()
     # The cast is what guarantees the result's types, including the UTC label on
     # knowledge_time (relabelling a zone keeps the same instant).
     return result.cast(RESULT_SCHEMA)

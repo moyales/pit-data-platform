@@ -6,14 +6,14 @@ from datetime import UTC, date, datetime, timedelta
 
 import pyarrow as pa
 import pytest
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
+from strategies import ingest_sequences, make_ingest
 
 from pitdata.schema import RECORD_SCHEMA, SchemaError
 from pitdata.sources.fama_french import VALIDATION as FF_VALIDATION
 from pitdata.validated import LagRule, SourceConfig, derive_records
 
-SOURCE = "ken_french"
 S = "FF3_DAILY.MKT_RF"
 D = date(2024, 1, 15)
 # Lag rule used in most tests: known by the end of the second month after.
@@ -25,24 +25,6 @@ RULE_JAN = datetime(2024, 4, 1, tzinfo=UTC)
 # first ingest are "assumed" at RULE_JAN.
 T1 = datetime(2024, 6, 1, 12, tzinfo=UTC)
 T2, T3, T4, T5 = (T1 + timedelta(days=n) for n in (1, 2, 3, 4))
-
-
-def make_ingest(time: datetime, rows: dict, source: str = SOURCE) -> tuple[dict, pa.Table]:
-    """One raw ingest. `rows` maps (series_id, valid_date) to a value (or None)."""
-    ingest_id = f"{time:%Y%m%dT%H%M%SZ}_test"
-    meta = {"ingest_id": ingest_id, "ingest_time": time.isoformat(), "source": source}
-    keys = list(rows)
-    table = pa.table(
-        {
-            "series_id": pa.array([k[0] for k in keys], type=pa.string()),
-            "valid_date": pa.array([k[1] for k in keys], type=pa.date32()),
-            "value": pa.array([rows[k] for k in keys], type=pa.float64()),
-            "ingest_time": pa.array([time] * len(keys), type=pa.timestamp("us", tz="UTC")),
-            "ingest_id": pa.array([ingest_id] * len(keys), type=pa.string()),
-            "source": pa.array([source] * len(keys), type=pa.string()),
-        }
-    )
-    return meta, table
 
 
 def records(ingests, config=CONFIG) -> list[dict]:
@@ -322,29 +304,7 @@ def test_result_does_not_depend_on_the_machine_time_zone():
 
 # --- differential property test ------------------------------------------------------
 
-_KEYS = [
-    (series, day)
-    for series in ("A.X", "A.Y")
-    for day in (date(2024, 1, 31), date(2024, 2, 1), date(2024, 2, 29), date(2024, 3, 15))
-]
 
-
-@st.composite
-def ingest_sequences(draw):
-    # Ingest times between 2024-03-16 and about 2024-08: some before and some
-    # after the rule instants (2024-04-01 to 2024-06-01), never before a valid date.
-    offsets = draw(st.lists(st.integers(0, 150 * 24), min_size=1, max_size=6, unique=True))
-    base = datetime(2024, 3, 16, tzinfo=UTC)
-    ingests = []
-    for hours in offsets:
-        present = draw(st.lists(st.sampled_from(_KEYS), unique=True, max_size=len(_KEYS)))
-        # Few distinct values, so changes and reversions (A->B->A) are common.
-        rows = {k: draw(st.sampled_from([0.25, -1.5, 3.0, None])) for k in present}
-        ingests.append(make_ingest(base + timedelta(hours=hours), rows))
-    return ingests
-
-
-@settings(max_examples=200, deadline=None)
 @given(ingest_sequences(), st.integers(0, 3))
 def test_sql_matches_reference_implementation(ingests, months_after):
     config = SourceConfig(LagRule("r", "1", months_after), divide_by=100.0)

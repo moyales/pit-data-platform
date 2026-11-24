@@ -162,6 +162,12 @@ Properties, each checked at random query times T:
 
 Before the first ingest, though, P is empty, while the first ingest's assumed records can have knowledge times at or before T. For example: August data assumed known on Nov 1, downloaded on Nov 19, queried as of Nov 10. This is what "assumed" means: knowledge placed in the past by a rule, after the fact. Property 2 pins it down. Before the first ingest, the store makes claims only by assumption, and labels them as such.
 
+**Added during implementation (D-032).**
+
+- **6. The query is the as-of rule.** `get_from` equals the rule written as a plain Python loop. Properties 1 to 5 compare the query with itself, so a mistake that affects every call alike passes them; mutation testing showed `<` for `<=` surviving all five.
+- **Query times** are drawn from random times and from boundaries: every ingest time and lag-rule instant, and one microsecond either side.
+- **Speed.** Running these needed a shared DuckDB database with one session per call (D-031) instead of a new database per call.
+
 ## 6. Quality report
 
 **First, a short investigation:** does a maintained calendar library, such as `exchange_calendars` with its `XNYS` calendar, model NYSE sessions back to 1926, including Saturdays before 1952-05-24? Record the answer in the design log. If it doesn't, calendar checks start from the first date the library models correctly, and the gap is a stated limitation. Never fall back to Monday to Friday: the real file has 1,158 Saturday rows.
@@ -177,6 +183,16 @@ Before the first ingest, though, P is empty, while the first ingest's assumed re
 - **Gaps:** the largest gap between consecutive dates, in calendar days.
 
 The build prints one summary line per source when anything warns.
+
+**Outcome (D-033, D-034).**
+
+- **The investigation:** `pandas_market_calendars` matches the real file on every date, including all Saturdays. `exchange_calendars` XNYS has no Saturdays and gets pre-1970 holidays wrong, matching only from 1970.
+- **Correction to the outlier rationale above:** 0.25 does *not* flag October 1987 (−17.44%, the worst day in the file). It flags no real day at all. Its job is to catch unit and corruption errors: values left in percent exceed it on 44,972 of 105,352 records.
+- **Changes during implementation:**
+  - Value checks cover every record, not only the latest.
+  - Missing sessions are judged per series.
+  - Gaps are reported with status `info` and never warn.
+  - The restatement check warns above 1% of an ingest's rows.
 
 ## 7. ETF price investigation (no code)
 

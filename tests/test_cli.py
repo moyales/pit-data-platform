@@ -95,7 +95,9 @@ def run_build(raw: Path, out: Path, *extra: str):
     return runner.invoke(cli.app, ["build", "--raw", str(raw), "--out", str(out), *extra])
 
 
-def test_build_after_ingest_prints_one_line_per_source(tmp_path, use_fetch):
+def test_build_prints_a_summary_and_one_warning_line_and_still_succeeds(tmp_path, use_fetch):
+    # The fixture has two missing-value markers on purpose, so the null check
+    # warns. Warnings never fail the build (D-023).
     use_fetch(lambda url: fixture_zip())
     raw, out = tmp_path / "raw", tmp_path / "validated"
     assert run(raw).exit_code == 0
@@ -104,6 +106,7 @@ def test_build_after_ingest_prints_one_line_per_source(tmp_path, use_fetch):
     assert result.exit_code == 0, result.output
     assert result.output == (
         f"ken_french: 28 records, 0 restated keys, from 1 ingest -> {out / 'ken_french.parquet'}\n"
+        f"ken_french: quality warnings: nulls (2); see {out / 'ken_french.quality.json'}\n"
     )
 
 

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import pyarrow as pa
 import requests
 
+from pitdata.quality import QualityConfig
 from pitdata.raw import IngestResult, write_raw
 from pitdata.validated import LagRule, SourceConfig
 
@@ -34,6 +35,16 @@ VALIDATION = SourceConfig(
     lag_rule=LagRule(name="ff_month_end_plus_2", version="1", months_after=2),
     divide_by=100.0,
 )
+
+# Quality checks for the report (D-033, D-034):
+# - Dates follow the NYSE calendar, including Saturday sessions before
+#   1952-05-24; the real file matches it on every date from 1926.
+# - 0.25 guards against unit and corruption errors: a normal day is around
+#   0.01, so values left in percent exceed it almost everywhere. No real day
+#   reaches it (the worst is 1987-10-19, Mkt-RF -17.44%), so a warning always
+#   means something. It is too loose to catch a bad RF value (RF stays below
+#   0.001).
+QUALITY = QualityConfig(calendar="NYSE", max_abs_value=0.25, restatement_warn_fraction=0.01)
 
 # Confirmed on the data library page on 2026-11-18.
 FF3_DAILY_URL = (

@@ -18,7 +18,7 @@ Raw stores **only what was observed**: what the source file said, and when we fe
 5. **CLI:** `pit ingest ff`.
 6. **Docs:** new design-log entries if anything changed during implementation, and the README's Known limitations.
 
-One pull request per task, or per pair of small tasks. Explain the approach before writing each component (see CLAUDE.md, "How to work with me").
+One pull request per task, or per pair of small tasks. Explain the approach before writing each component.
 
 ## 1. Schema refactor (`schema.py`)
 

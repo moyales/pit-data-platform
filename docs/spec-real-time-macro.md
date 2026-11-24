@@ -73,7 +73,7 @@ ALFRED was the original plan. Its terms forbid it (D-035).
 6. **Build and quality:**
    - registry entries and quality configs;
    - an end-to-end check on real data, which becomes the README demo.
-7. **Docs:** design log, README, `CLAUDE.md` status.
+7. **Docs:** design log and README.
 
 Explain the approach before writing each component.
 

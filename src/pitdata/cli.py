@@ -68,6 +68,11 @@ def build(
             f"{r.source}: {r.record_count:,} records, {r.restated_keys:,} restated keys, "
             f"from {r.ingest_count:,} ingest{'s' if r.ingest_count != 1 else ''} -> {r.path}"
         )
+        # Checks warn, they never fail the build (D-023): one line, then the file.
+        if r.warnings:
+            typer.echo(
+                f"{r.source}: quality warnings: {', '.join(r.warnings)}; see {r.quality_path}"
+            )
 
 
 @app.command("get")

@@ -18,9 +18,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-import duckdb
 import pyarrow as pa
 
+from pitdata._duckdb import session
 from pitdata.schema import RAW_SCHEMA, RECORD_SCHEMA, require_utc, validate
 
 
@@ -126,13 +126,9 @@ def derive_records(ingests: Sequence[tuple[dict, pa.Table]], config: SourceConfi
 
     tables = _check_and_tag(ingests)
 
-    # A private in-memory connection: settings such as TimeZone must not leak
-    # to or from any other DuckDB user in the process.
-    con = duckdb.connect()
-    try:
-        # Without this, the lag rule's instant is midnight in the machine's
-        # local zone: in Tokyo, nine hours early, which is lookahead (D-024).
-        con.execute("SET TimeZone = 'UTC'")
+    # A private UTC session (D-031): the lag rule's instant is a DATE cast to
+    # TIMESTAMPTZ, which would otherwise use the machine's local zone (D-024).
+    with session() as con:
         con.register("raw", pa.concat_tables(tables))
         duplicates = con.sql(_DUPLICATE_KEYS_SQL).fetchall()
         if duplicates:
@@ -141,8 +137,6 @@ def derive_records(ingests: Sequence[tuple[dict, pa.Table]], config: SourceConfi
             _DERIVE_SQL,
             params={"months": config.lag_rule.months_after + 1, "divide_by": config.divide_by},
         ).to_arrow_table()
-    finally:
-        con.close()
 
     return validate(result, RECORD_SCHEMA)
 

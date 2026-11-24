@@ -6,6 +6,7 @@ sample CSV, so these tests exercise the same files the real CLI produces.
 
 import hashlib
 import io
+import json
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -156,7 +157,10 @@ def test_failure_before_the_swap_keeps_the_old_file_and_no_temp(raw, tmp_path, m
     monkeypatch.undo()
 
     assert result.path.read_bytes() == old_bytes
-    assert sorted(p.name for p in out.iterdir()) == ["ken_french.parquet"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        "ken_french.parquet",
+        "ken_french.quality.json",
+    ]
 
 
 def test_stale_temp_files_are_ignored_and_left_alone(raw, tmp_path):
@@ -185,7 +189,10 @@ def test_only_builds_the_named_source(raw, tmp_path):
     out = tmp_path / "validated"
     (result,) = build(raw, out, CONFIGS, only=SOURCE)
     assert result.source == SOURCE
-    assert sorted(p.name for p in out.iterdir()) == ["ken_french.parquet"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        "ken_french.parquet",
+        "ken_french.quality.json",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -211,7 +218,7 @@ def test_no_raw_folder_builds_nothing(tmp_path):
 def test_source_with_no_finished_ingests_writes_an_empty_valid_file(tmp_path):
     raw = tmp_path / "raw"
     (raw / SOURCE / ".tmp-crashed-abcd").mkdir(parents=True)
-    result = build_source(raw, tmp_path / "validated", SOURCE, VALIDATION)
+    result = build_source(raw, tmp_path / "validated", SOURCE, CONFIGS[SOURCE])
     assert result.record_count == 0
     assert read_validated(result.path).num_rows == 0
     assert read_build_info(result.path)["raw_ingest_ids"] == []
@@ -224,3 +231,75 @@ def test_read_build_info_rejects_a_file_not_written_by_build(tmp_path):
     pq.write_table(RECORD_SCHEMA.empty_table(), path)
     with pytest.raises(BuildError, match="no build information"):
         read_build_info(path)
+
+
+# --- the quality report ------------------------------------------------------------
+
+
+def read_report(result) -> dict:
+    return json.loads(result.quality_path.read_text())
+
+
+def test_build_writes_a_quality_report_next_to_the_table(raw, tmp_path):
+    (result,) = build(raw, tmp_path / "validated", CONFIGS)
+    report = read_report(result)
+
+    assert result.quality_path == tmp_path / "validated" / "ken_french.quality.json"
+    assert report["source"] == SOURCE
+    assert report["describes"] == {
+        "raw_ingest_ids": read_build_info(result.path)["raw_ingest_ids"],
+        "record_count": 28,
+    }
+    assert report["quality_config"] == {
+        "calendar": "NYSE",
+        "max_abs_value": 0.25,
+        "restatement_warn_fraction": 0.01,
+    }
+    # The sample file has two missing-value markers, on purpose; its dates are
+    # all real NYSE sessions, checked against the real calendar.
+    assert (report["status"], result.warnings) == ("warn", ["nulls (2)"])
+    assert report["checks"]["dates_not_sessions"]["status"] == "ok"
+    assert report["checks"]["sessions_missing"]["status"] == "ok"
+
+
+def test_two_builds_write_identical_reports(raw, tmp_path):
+    first = build(raw, tmp_path / "a", CONFIGS)[0].quality_path
+    second = build(raw, tmp_path / "b", CONFIGS)[0].quality_path
+    assert first.read_bytes() == second.read_bytes()
+
+
+def test_the_report_follows_a_rebuild(raw, tmp_path):
+    out = tmp_path / "validated"
+    build(raw, out, CONFIGS)
+    ingest(raw, restated_csv(), T2)
+    (result,) = build(raw, out, CONFIGS)
+    report = read_report(result)
+    assert len(report["describes"]["raw_ingest_ids"]) == 2
+    assert report["checks"]["restatements"]["count"] == 1
+
+
+def test_the_calendar_can_be_injected(raw, tmp_path):
+    (result,) = build(raw, tmp_path / "validated", CONFIGS, sessions=lambda c, s, e: frozenset())
+    assert "dates_not_sessions (28)" in result.warnings
+
+
+def test_a_crash_in_the_checks_leaves_the_new_table_and_a_detectably_old_report(
+    raw, tmp_path, monkeypatch
+):
+    # The table and the report cannot be replaced in one atomic step. The
+    # report says which ingests it describes, so a stale one can be detected.
+    out = tmp_path / "validated"
+    build(raw, out, CONFIGS)
+    ingest(raw, restated_csv(), T2)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("check crashed")
+
+    monkeypatch.setattr(build_mod, "check_quality", boom)
+    with pytest.raises(RuntimeError, match="check crashed"):
+        build(raw, out, CONFIGS)
+
+    table_ids = read_build_info(out / "ken_french.parquet")["raw_ingest_ids"]
+    report = json.loads((out / "ken_french.quality.json").read_text())
+    assert len(table_ids) == 2
+    assert report["describes"]["raw_ingest_ids"] != table_ids

@@ -1,5 +1,7 @@
 # Spec: validated layer, as-of query and property tests (Week 2)
 
+> **Status (2026-11-23):** tasks 1 to 6 are implemented and merged. Still open: task 7 (ETF price research) and the remaining docs in task 8.
+
 *Agreed Nov 19, 2026. Implements decisions D-020 to D-024 in `docs/design-notes.md`. Builds on `docs/spec-raw-layer-and-ff-ingest.md` and replaces its "Not in this step (Week 2)" section, which had a bug (see D-020).*
 
 ## Scope

@@ -184,6 +184,16 @@ Before the first ingest, though, P is empty, while the first ingest's assumed re
 
 The build prints one summary line per source when anything warns.
 
+**Outcome (D-033, D-034).**
+
+- **The investigation:** `pandas_market_calendars` matches the real file on every date, including all Saturdays. `exchange_calendars` XNYS has no Saturdays and gets pre-1970 holidays wrong, matching only from 1970.
+- **Correction to the outlier rationale above:** 0.25 does *not* flag October 1987 (−17.44%, the worst day in the file). It flags no real day at all. Its job is to catch unit and corruption errors: values left in percent exceed it on 44,972 of 105,352 records.
+- **Changes during implementation:**
+  - Value checks cover every record, not only the latest.
+  - Missing sessions are judged per series.
+  - Gaps are reported with status `info` and never warn.
+  - The restatement check warns above 1% of an ingest's rows.
+
 ## 7. ETF price investigation (no code)
 
 Write `docs/research-etf-prices.md`, covering each candidate free source:

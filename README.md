@@ -114,17 +114,17 @@ Every decision, with alternatives and limitations, is in [`docs/design-notes.md`
 |---|---|
 | Raw, validated and query layers; one command rebuilds the store from raw | Done |
 | Fama-French daily factors | Done |
-| Macro series with real revision history (ALFRED) | Not started: **next** |
+| Macro series with real revision history (Philadelphia Fed real-time data) | Specified ([spec](docs/spec-real-time-macro.md)); **next** |
 | Daily ETF prices, unadjusted, with split and dividend factors and adjusted prices computed as of a date | Not started; data sources being researched first |
 | Property tests, including append-invariance | Done, for the one source |
 | Data-quality checks | Missing sessions, unexpected dates, duplicate keys, nulls, implausible values, restatement bursts. Not yet: stale prices and one-day returns, which need prices |
 | CI: lint, format, unit and property tests | Done |
 
-**What this means in practice.** Every rule is tested, but Fama-French publishes only its current file, so all history loaded so far has *assumed* knowledge times. The store has not yet held a real revision. ALFRED comes next for that reason: it publishes every past vintage of a macro series, so revisions can be queried on real data rather than only in tests.
+**What this means in practice.** Every rule is tested, but Fama-French publishes only its current file, so all history loaded so far has *assumed* knowledge times. The store has not yet held a real revision. Real-time macro data comes next for that reason. The Philadelphia Fed publishes every past vintage of each variable, so revisions can be queried on real data rather than only in tests. ALFRED, the original plan, was dropped because FRED's terms forbid storing its data (D-035).
 
 ## Roadmap
 
-1. **Macro series with real revision history** (ALFRED). Knowledge times come from published vintage dates rather than from a lag rule.
+1. **Macro series with real revision history** from the Philadelphia Fed's [Real-Time Data Set for Macroeconomists](https://www.philadelphiafed.org/surveys-and-data/real-time-data-research/real-time-data-set-for-macroeconomists): housing starts, nonfarm payrolls and real GDP. Knowledge times come from each vintage's date rather than from a lag rule ([spec](docs/spec-real-time-macro.md)).
 2. **Daily ETF prices**, stored unadjusted, with split and dividend factors kept separately and adjusted prices computed as of a date. This starts with a written survey of free sources, because many free price feeds are already adjusted.
 
 Out of scope for v1: intraday data, fundamentals, a web UI, cloud deployment and scheduling.
@@ -134,6 +134,8 @@ Out of scope for v1: intraday data, fundamentals, a web UI, cloud deployment and
 pitdata ships **download code, not data**. Nothing under `data/` is committed, and test fixtures contain only invented numbers.
 
 - **Fama-French factors:** [Kenneth R. French Data Library](https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html). Data is fetched by the person running the tool. Please read and respect the library's terms of use.
+- **Real-time macro data (planned):** the Philadelphia Fed's Real-Time Data Set for Macroeconomists. Its site permits use "for informational, educational, and research purposes only". Please cite Croushore and Stark, "A Real-Time Data Set for Macroeconomists", *Journal of Econometrics* 105 (2001).
+- **Not used: FRED and ALFRED.** Their terms forbid storing or archiving the data without the St. Louis Fed's written consent, and an append-only store does exactly that (D-035).
 
 ## Known limitations
 
@@ -141,7 +143,7 @@ This is a personal research project built on free data. Free data has no accurac
 
 ### Scope
 - **Single machine, single user, daily frequency.** No concurrency control, scheduling, monitoring or access control.
-- **Real vintages exist only for macro data (planned via ALFRED).** For factors and prices, knowledge times for history loaded after the fact are assumed.
+- **Real vintages exist only for macro data (planned, from the Philadelphia Fed).** For factors and prices, knowledge times for history loaded after the fact are assumed.
 
 ### Raw layer
 - **One writer at a time.** Two ingests running at once could both treat the same content as new. Nothing locks against this.

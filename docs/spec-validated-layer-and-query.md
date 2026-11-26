@@ -25,7 +25,7 @@
 5. **Property tests:** append-invariance, no leaks, causality, final state.
 6. **Quality report**, after a short calendar investigation.
 7. **ETF price investigation:** a findings document only.
-8. **Docs:** design log, README (status, roadmap, limitations), `CLAUDE.md` status.
+8. **Docs:** design log and README (status, roadmap, limitations).
 
 One pull request per task, or per pair of small tasks. Explain the approach before writing each component.
 
@@ -214,7 +214,7 @@ Facts are checked against current sources and dated; nothing is taken from memor
 - `pit ingest ff` followed by `pit build` produces `data/validated/ken_french.parquet` and `ken_french.quality.json`.
 - `get("FF3_DAILY.MKT_RF", date(2024,1,2), date(2024,1,31), asof=<a UTC datetime>)` returns decimal values (for example 0.0025, not 0.25).
 - The property tests run in CI under Hypothesis's default profile.
-- `docs/design-notes.md`, the README and `CLAUDE.md` reflect what was built.
+- `docs/design-notes.md` and the README reflect what was built.
 
 ## Limitations to carry into the README
 
